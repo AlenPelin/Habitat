@@ -17,14 +17,14 @@ This project assumes the following settings:
 
 | Setting             |  Value                                                                     | Change in <sup>1 *see below*</sup> |
 | ---                 | ---                                                                        | --- |
-| Source location     | C:\projects\Habitat\                                                       | `Habitat.Dev.config` |
+| Source location     | C:\Habitat\                                                                | `Habitat.Dev.config` |
 | Website location    | C:\inetpub\wwwroot\habitat.dev.local\                                      | `gulp-config.js`, `settings.ps1`, `xconnect-XP0.json`, `sitecore-XP0.json` |
 | Website URL         | [https://habitat.dev.local/](https://habitat.dev.local/)                   | `publishsettings.targets`, `settings.ps1`, `Habitat.Website.config` |
 | SQL Server          | .                                                                          | `settings.ps1` |
 | SQL Server Admin    | sa                                                                         | `settings.ps1` |
 | SQL Server Password | 12345                                                                      | `settings.ps1` |
-| SOLR Location       | C:\solr\solr-7.5.0                                                         | `settings.ps1` |
-| SOLR URL            | [https://solr750:8750/solr](https://solr750:8750/solr) (*Note https*)      | `settings.ps1` |
+| SOLR Location       | c:\etc\solr-7.5.0                                                         | `settings.ps1` |
+| SOLR URL            | [https://localhost:8750/solr](https://localhost:8750/solr) (*Note https*)  | `settings.ps1` |
 | SOLR Windows Service Name   | Solr-7.5.0                                                         | `settings.ps1` |
 
 <sup>1</sup> Files referred are:

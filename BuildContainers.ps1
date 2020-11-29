@@ -34,9 +34,7 @@ function Invoke-ScriptBlock {
     }        
 
     if ($Suffix -and "$Suffix".Length -gt 0) {
-        if ($Suffix[0] -ne "-") {
-            $Suffix = "-$($Suffix)"
-        }
+        $Suffix = "-$($Suffix.Trim('-'))"
     } else {
         $date = (get-date -Format s).Substring(0, "2020-01-01".Length)
         $Suffix = "-$($date)"
@@ -72,6 +70,10 @@ function Invoke-ScriptBlock {
         MKDIR $habitat -Force | Out-Null;
         RMDIR $habitat -Recurse -Force;
         MKDIR $habitat -Force | Out-Null;
+
+        MKDIR $PSScriptRoot\containers\sqldev\files -Force | Out-Null;
+        RMDIR $PSScriptRoot\containers\sqldev\files -Recurse -Force;
+        MKDIR $PSScriptRoot\containers\sqldev\files -Force | Out-Null;
 
         # prepare our custom files for docker images
         # including vanila web.config, layers.config and domains.config
@@ -170,6 +172,9 @@ function Invoke-ScriptBlock {
     }
 
     try {
+        Write-Host "Starting docker containers"
+# Read-Host "Proceed?"
+        & .\containers\compose\Shutdown.ps1 
         & .\containers\compose\Compose.ps1 -Detach
 
         if ($LASTEXITCODE -NE 0) {
@@ -188,14 +193,70 @@ function Invoke-ScriptBlock {
         # so get list of all and do only ones that 
         $info = docker ps
 
+        if (-not $SkipSql) {
+            # stop sitecore first
+            $done = $false;
+            $info | where { $_ -like "*:44100*" } | foreach {
+                $sha = $_.Substring(0, "2cf343219ca6".Length);
+                if ($done) {
+                    return;
+                }
+
+                Write-Host "Stopping Sitecore container $sha"
+                docker stop $sha
+                $done = $true;
+            }
+
+            if (-not $done) {
+                Write-Error "Failed to find Sitecore container among these:"
+                $info
+                exit -1;
+            }            
+
+            $done = $false;
+            $info | where { $_ -like "*:44151*" } | foreach {
+                # 2cf343219ca6        altola.azurecr.io/sitecore-xp-jss-sqldev:9.2.0-windowsservercore-ltsc2019      "powershell -Command…"   23 minutes ago      Up 23 minutes (healthy)   0.0.0.0:44151->1433/tcp   compose_sql_1
+                $sha = $_.Substring(0, "2cf343219ca6".Length);
+                if ($done) {
+                    return;
+                }                
+
+                Write-Host "Detaching databases from $sha container"
+
+# Read-Host "Proceed?"
+
+                $dbs = (docker exec $sha sqlcmd -S . -E -Q "SET NOCOUNT ON; SELECT name FROM sys.databases WHERE name NOT IN ('master', 'model', 'tempdb', 'msdb', 'Resource')" -h -1)
+                $dbs | %{
+                    Write-Host "Detaching database $_"
+# Read-Host "Proceed?"
+                    $result = (docker exec $sha sqlcmd -S . -E -Q "exec sp_detach_db [$($_)]" -h -1)
+                    if ($result.Length -gt 0) {
+                        Write-Error "Failed to detach $_ db: $result"
+                    }
+                }
+
+                $done = $true;
+            }
+
+            if (-not $done) {
+                Write-Error "Failed to find sqldev container among these:"
+                $info
+                exit -1;
+            }
+        }
+
         # stop containers to commit images (after saving them to $info)
+        Write-Host "Stopping remaining docker containers"
+    # Read-Host "Proceed?"
         & .\containers\compose\Stop.ps1
 
         if (-not $SkipSql) {
+            Write-Host "Preparing files for XP SqlDev"
+# Read-Host "Proceed?"
+
             Copy-Item "$PSScriptRoot\containers\sqldev\Boot.ps1" "$PSScriptRoot\containers\sqldev\files" -Force
-            DIR "$PSScriptRoot\containers\sqldev\files\*.ldf" | Remove-Item -Force
-            DIR "$PSScriptRoot\containers\sqldev\files\*_Primary.*" | %{ Rename-Item $_.FullName -NewName ($_.Name.Replace('_Primary', ''))}
             
+            Write-Host "Building XP SqlDev"
             docker build "$PSScriptRoot\containers\sqldev" --build-arg BASE_IMAGE="$RegistryToRead$MicrosoftSqlImage" -t "$RegistryUS$HabitatXpSqlDevImage" -t "$RegistryEU$HabitatXpSqlDevImage"
 
             if ($LASTEXITCODE -ne 0) {
@@ -203,20 +264,31 @@ function Invoke-ScriptBlock {
             }
 
             if (-not $SkipPush) {
+                Write-Host "Pushing XP SqlDev"
                 docker push $ImageNameUS;
                 docker push $ImageNameEU;
             } else {
                 Write-Host "Skipping push"
             }
 
+            Write-Host "Preparing files for XM SqlDev"
+# Read-Host "Proceed?"
+
             MKDIR "$PSScriptRoot\containers\sqldev\files-xm" -Force | Out-Null
             RMDIR "$PSScriptRoot\containers\sqldev\files-xm" -Recurse -Force | Out-Null
             MKDIR "$PSScriptRoot\containers\sqldev\files-xm" -Force | Out-Null
-            Copy-Item "$PSScriptRoot\containers\sqldev\files\Sitecore.Core.mdf" "$PSScriptRoot\containers\sqldev\files-xm"
-            Copy-Item "$PSScriptRoot\containers\sqldev\files\Sitecore.Master.mdf" "$PSScriptRoot\containers\sqldev\files-xm"
+            Copy-Item "$PSScriptRoot\containers\sqldev\files\Sitecore.Core_Primary.mdf" "$PSScriptRoot\containers\sqldev\files-xm"
+            Copy-Item "$PSScriptRoot\containers\sqldev\files\Sitecore.Core_Primary.ldf" "$PSScriptRoot\containers\sqldev\files-xm"
+            Copy-Item "$PSScriptRoot\containers\sqldev\files\Sitecore.Master_Primary.mdf" "$PSScriptRoot\containers\sqldev\files-xm"
+            Copy-Item "$PSScriptRoot\containers\sqldev\files\Sitecore.Master_Primary.ldf" "$PSScriptRoot\containers\sqldev\files-xm"
+            Copy-Item "$PSScriptRoot\containers\sqldev\files\Sitecore.Web_Primary.mdf" "$PSScriptRoot\containers\sqldev\files-xm"
+            Copy-Item "$PSScriptRoot\containers\sqldev\files\Sitecore.Web_Primary.ldf" "$PSScriptRoot\containers\sqldev\files-xm"
             RMDIR "$PSScriptRoot\containers\sqldev\files" -Recurse -Force
             Rename-Item "$PSScriptRoot\containers\sqldev\files-xm" -NewName "files"
 
+            Copy-Item "$PSScriptRoot\containers\sqldev\Boot.ps1" "$PSScriptRoot\containers\sqldev\files" -Force
+
+            Write-Host "Building XM SqlDev"
             docker build "$PSScriptRoot\containers\sqldev" --build-arg BASE_IMAGE="$RegistryToRead$MicrosoftSqlImage" -t "$RegistryUS$HabitatXmSqlDevImage" -t "$RegistryEU$HabitatXmSqlDevImage"
 
             if ($LASTEXITCODE -ne 0) {
